@@ -1,5 +1,6 @@
 import config
 import exceptions
+import utils
 
 import logging
 import requests
@@ -50,12 +51,16 @@ class Session:
         return self._auth_token
 
     # Authentication
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Logging in with the username and password"
+    )
     def password_login(
         self,
         user_name: str,
         password: str
     ) -> None:
-        """Retrieves and sets the auth token for the session.
+        """Retrieves and sets the auth token and endpoint for the session.
 
         Member functions of the Session instance will automatically use the
         generated auth token.
@@ -70,7 +75,6 @@ class Session:
             user_name : str
             password : str
         """
-        logging.info("password_login()")
         resource_path: str = self._base_resource_path + "auth/token"
         response = self._try_request(
                 function=requests.post,
@@ -83,8 +87,14 @@ class Session:
                     'auth_type': 'password'
                 }
         )
-        self._set_auth_attr(response)
+        self._set_last_login_response(response)
+        self._set_auth_token()
+        self._set_obtained_url()
 
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Refreshing auth token"
+    )
     def refresh_token(self) -> None:
         """Refreshes the auth token with the already existing token.
 
@@ -94,7 +104,6 @@ class Session:
         token from the existing valid one, so that you will not need to
         re-authenticate. The same token used previously is not returned."
         """
-        logging.info("refresh_token()")
         resource_path: str = self._base_resource_path + "auth/token"
         response = self._try_request(
             function=requests.post,
@@ -103,9 +112,15 @@ class Session:
             headers={'Authorization': self._auth_token},
             data={'auth_type': 'token'}
         )
-        self._set_auth_attr(response)
+        self._set_last_login_response(response)
+        self._set_auth_token()
+        self._set_obtained_url()
 
     # API Throttle
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Retrieving Responsys API throttle limits"
+    )
     def get_throttle_limits(self) -> dict:
         """Obtains a list of API throttling limits for your Responsys account.
 
@@ -118,7 +133,6 @@ class Session:
         -------
             dict
         """
-        logging.info("get_throttle_limits()")
         resource_path: str = "/rest/api/ratelimit"
         response = self._try_request(
             function=requests.get,
@@ -129,6 +143,10 @@ class Session:
         return response.json()
 
     # Campaigns
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Fetching a campaign"
+    )
     def fetch_a_campaign(self, campaign_name: str) -> dict:
         """Fetches the campaign object and its properties.
 
@@ -144,7 +162,6 @@ class Session:
         -------
             dict
         """
-        logging.info("fetch_a_campaign()")
         resource_path: str = self._base_resource_path + "campaigns/" +  \
             campaign_name
         response = self._try_request(
@@ -158,9 +175,13 @@ class Session:
         )
         return response.json()
 
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Fetching a batch of campaigns"
+    )
     def fetch_all_campaigns(
         self,
-        limit: int = 200, offset: int = 0, type: str = "email",
+        limit: int = 200, offset: int = 0, campaign_type: str = "email",
         resource_path: Optional[str] = None
     ) -> dict:
         """Fetches a maximum of 200 campaigns and their properties at a time.
@@ -168,24 +189,23 @@ class Session:
         "Obtain the campaign properties for all EMD Email, Push, Message
         Center, SMS, or MMS campaigns."
 
-        Sorted by campaign id in ascending order.
+        Retrieved in ascending order of campaign id.
 
         Parameters
         ----------
             offset : int
             limit : int
-            type : str
+            campaign_type : str
             resource_path : str
-                Optional, overrides the offset, limit, and type args.
+                Optional, overrides the offset, limit, and campaign_type args.
 
         Returns
         -------
             dict
         """
-        logging.info("fetch_all_campaigns()")
         if resource_path is None:
             resource_path = self._base_resource_path +  \
-                f"campaigns?limit={limit}&offset={offset}&type={type}"
+                f"campaigns?limit={limit}&offset={offset}&type={campaign_type}"
         response = self._try_request(
             function=requests.get,
             timeout=config.TRY_REQUEST_SETTINGS['request_timeout'],
@@ -197,33 +217,44 @@ class Session:
         )
         return response.json()
 
-    def complete_fetch_all_campaigns(self, type: str = "email") -> dict:
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Begin fetching every campaign",
+        after_msg="Finished fetching every campaign"
+    )
+    def complete_fetch_all_campaigns(
+        self, campaign_type: str = "email"
+    ) -> dict:
         """Runs fetch_all_campaigns until all campaigns are fetched.
 
         Parameters
         ----------
-            type : str
+            campaign_type : str
 
         Returns
         -------
             dict
         """
-        logging.info("complete_fetch_all_campaigns()")
-        temp_fetched: dict = self.fetch_all_campaigns(
-            limit=200, offset=0, type=type
+        fetched: dict = self.fetch_all_campaigns(
+            limit=200, offset=0, campaign_type=campaign_type
         )
         # Get the resource_path for the next batch, if available.
-        resource_path: str = self._get_next_resource_path(temp_fetched)
+        resource_path: str = self._get_next_resource_path(fetched)
         while (resource_path):
-            current_batch = self.fetch_all_campaigns(
+            current_batch: dict = self.fetch_all_campaigns(
                 resource_path=resource_path
             )
-            temp_fetched['campaigns'] += current_batch['campaigns']
-            temp_fetched['links'] = current_batch['links']
-            resource_path = self._get_next_resource_path(temp_fetched)
-        return temp_fetched
+            fetched['campaigns'] += current_batch['campaigns']
+            fetched['links'] = current_batch['links']
+            resource_path = self._get_next_resource_path(fetched)
+        self._dedupe("campaigns", fetched)
+        return fetched
 
     # Programs
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Fetching a batch of programs"
+    )
     def fetch_all_programs(
         self,
         limit: int = 200, offset: int = 0, status: str = "",
@@ -236,7 +267,7 @@ class Session:
         response includes draft and published programs, and it includes program
         status information."
 
-        Sorted by program id in ascending order.
+        Retrieved in ascending order of program id.
 
         Parameters
         ----------
@@ -244,13 +275,12 @@ class Session:
             offset : int
             status : str
             resource_path : str
-                Optional, overrides the offset, limit, and type args.
+                Optional, overrides the offset, limit, and status args.
 
         Returns
         -------
             dict
         """
-        logging.info("fetch_all_programs()")
         if resource_path is None:
             resource_path = self._base_resource_path +  \
                 f"programs?limit={limit}&offset={offset}&status={status}"
@@ -265,6 +295,11 @@ class Session:
         )
         return response.json()
 
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Begin fetching every program",
+        after_msg="Finished fetching every program"
+    )
     def complete_fetch_all_programs(self, status: str = "") -> dict:
         """Runs fetch_all_programs until all programs are fetched.
 
@@ -276,40 +311,55 @@ class Session:
         -------
             dict
         """
-        logging.info("complete_fetch_all_programs()")
-        temp_fetched: dict = self.fetch_all_programs(
+        fetched: dict = self.fetch_all_programs(
             limit=200, offset=0, status=status
         )
         # Get the resource_path for the next batch, if available.
-        resource_path: str = self._get_next_resource_path(temp_fetched)
+        resource_path: str = self._get_next_resource_path(fetched)
         while (resource_path):
             current_batch: dict = self.fetch_all_programs(
                 resource_path=resource_path
             )
-            temp_fetched['programs'] += current_batch['programs']
-            temp_fetched['links'] = current_batch['links']
-            resource_path = self._get_next_resource_path(temp_fetched)
-        return temp_fetched
+            fetched['programs'] += current_batch['programs']
+            fetched['links'] = current_batch['links']
+            resource_path = self._get_next_resource_path(fetched)
+        self._dedupe("programs", fetched)
+        return fetched
 
     # Private member functions
-    def _set_auth_attr(self, response: requests.Response) -> None:
-        """Assigns the attributes needed for other API calls to the object.
-
-        Called by the member functions, password_login and refresh_token.
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Setting the last login response"
+    )
+    def _set_last_login_response(self, response: requests.Response) -> None:
+        """Sets and saves the last login response.
 
         Parameters
         ----------
             response : requests.Response
         """
-        logging.debug("_set_auth_attr()")
         self._last_login_response = response.json()
-        self._auth_token = self._last_login_response['authToken']
-        self._obtained_url = self._last_login_response['endPoint']
-        logging.debug(
-            f"last_login_response = {self._last_login_response}"
-        )
-        logging.debug(f"auth_token = {self._auth_token}")
 
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Setting the auth token"
+    )
+    def _set_auth_token(self) -> None:
+        """Sets the auth token needed for most of the other API calls."""
+        self._auth_token = self._last_login_response['authToken']
+
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Setting the obtained URL"
+    )
+    def _set_obtained_url(self) -> None:
+        """Sets the obtained URL needed for most of the other API calls."""
+        self._obtained_url = self._last_login_response['endPoint']
+
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Trying request"
+    )
     def _try_request(
         self,
         function: Callable,
@@ -340,7 +390,6 @@ class Session:
         --------
             response (requests.Response)
         """
-        logging.debug("_try_request()")
         for i in range(settings['times_to_try']):
             try:
                 response = function(
@@ -374,7 +423,7 @@ class Session:
                 )
             if i+1 != config.TRY_REQUEST_SETTINGS['times_to_try']:
                 logging.warning(
-                    "Waiting {} seconds before next request attempt...".format(
+                    "Retrying in {} seconds...".format(
                         config.TRY_REQUEST_SETTINGS['wait_before_next_attempt']
                     )
                 )
@@ -387,6 +436,10 @@ class Session:
         )
         raise exceptions.FailedTryRequest()
 
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Getting the resource path for the next batch, if available"
+    )
     def _get_next_resource_path(self, fetched: dict) -> str:
         """Retrieves next href value from results of a complete fetch all.
 
@@ -398,10 +451,29 @@ class Session:
         -------
             str
         """
-        logging.debug("_get_next_resource_path()")
         resource_path: str = ""
         for link in fetched['links']:
             if 'rel' in link and 'next' == link['rel']:
                 resource_path = link['href']
                 break
         return resource_path
+
+    @utils.log_wrap(
+        logging_func=logging.debug,
+        before_msg="Deduping"
+    )
+    def _dedupe(self, object_type: str, fetched: dict) -> None:
+        """Drops any duplicate fetched campaigns or programs.
+
+        Parameters
+        ----------
+            object_type : str
+                The options are "campaigns" or "programs".
+            fetched : dict
+        """
+        fetched[object_type] = list(
+            {
+                object['id']: object
+                for object in fetched[object_type]
+            }.values()
+        )
