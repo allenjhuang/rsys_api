@@ -5,7 +5,7 @@ import utils
 import logging
 import requests
 import time
-from typing import Callable, Iterator
+from typing import Callable, Generator, Union
 
 
 class Session:
@@ -202,17 +202,17 @@ class Session:
         -------
             dict
         """
-        self._batch_of_campaigns: dict = self._campaign_batch_generator(
+        self._batch_of_campaigns: Generator = self._campaign_batch_generator(
             limit=limit, offset=offset, campaign_type=campaign_type
         )
-        fetch = next(self._batch_of_campaigns)
+        fetch: dict = next(self._batch_of_campaigns)
         return fetch
 
     @utils.log_wrap(
         logging_func=logging.info,
         before_msg="Fetching next campaign batch"
     )
-    def fetch_next_campaign_batch(self) -> dict:
+    def fetch_next_campaign_batch(self) -> Union[dict, None]:
         """Get the next batch of the fetch_a_campaign_batch.
 
         Cannot be used successfully if the function, fetch_a_campaign_batch,
@@ -220,7 +220,7 @@ class Session:
         Retrieved in ascending order of campaign id.
         """
         try:
-            fetch = next(self._batch_of_campaigns)
+            fetch: dict = next(self._batch_of_campaigns)
             return fetch
         except AttributeError:
             logging.exception(
@@ -248,13 +248,13 @@ class Session:
         -------
             dict
         """
-        batch: dict = self._campaign_batch_generator(
+        batch: Generator = self._campaign_batch_generator(
             limit=200, offset=0, campaign_type=campaign_type
         )
-        fetched = next(batch)
+        fetched: dict = next(batch)
         while True:
             try:
-                next_batch = next(batch)
+                next_batch: dict = next(batch)
                 fetched['campaigns'] += next_batch['campaigns']
                 fetched['links'] += next_batch['links']
             except StopIteration:
@@ -292,17 +292,17 @@ class Session:
         -------
             dict
         """
-        self._batch_of_programs: dict = self._program_batch_generator(
+        self._batch_of_programs: Generator = self._program_batch_generator(
             limit=limit, offset=offset, status=status
         )
-        fetch = next(self._batch_of_programs)
+        fetch: dict = next(self._batch_of_programs)
         return fetch
 
     @utils.log_wrap(
         logging_func=logging.info,
         before_msg="Fetching next program batch"
     )
-    def fetch_next_program_batch(self) -> dict:
+    def fetch_next_program_batch(self) -> Union[dict, None]:
         """Get the next batch after the fetch_a_program_batch.
 
         Cannot be used successfully if the function, fetch_a_program_batch, has
@@ -310,7 +310,7 @@ class Session:
         Retrieved in ascending order of program id.
         """
         try:
-            fetch = next(self._batch_of_programs)
+            fetch: dict = next(self._batch_of_programs)
             return fetch
         except AttributeError:
             logging.exception(
@@ -336,13 +336,13 @@ class Session:
         -------
             dict
         """
-        batch: dict = self._program_batch_generator(
+        batch: Generator = self._program_batch_generator(
             limit=200, offset=0, status=status
         )
-        fetched = next(batch)
+        fetched: dict = next(batch)
         while True:
             try:
-                next_batch = next(batch)
+                next_batch: dict = next(batch)
                 fetched['programs'] += next_batch['programs']
                 fetched['links'] += next_batch['links']
             except StopIteration:
@@ -467,13 +467,8 @@ class Session:
     def _campaign_batch_generator(
         self,
         limit: int = 200, offset: int = 0, campaign_type: str = "email"
-    ) -> dict:
-        """Fetches a maximum of 200 campaigns and their properties at a time.
-
-        "Obtain the campaign properties for all EMD Email, Push, Message
-        Center, SMS, or MMS campaigns."
-
-        Retrieved in ascending order of campaign id.
+    ) -> Generator:
+        """Retrieves the next batch of programs with each iteration.
 
         Parameters
         ----------
@@ -508,15 +503,8 @@ class Session:
     def _program_batch_generator(
         self,
         limit: int = 200, offset: int = 0, status: str = ""
-    ) -> dict:
-        """Fetches a maximum of 200 programs and their properties at a time.
-
-        "Use this interface to get a list of Responsys program orchestrations
-        for an account and the associated metadata for each program. The
-        response includes draft and published programs, and it includes program
-        status information."
-
-        Retrieved in ascending order of program id.
+    ) -> Generator:
+        """Retrieves the next batch of programs with each iteration.
 
         Parameters
         ----------
@@ -524,7 +512,7 @@ class Session:
             offset : int
             status : str
 
-        Returns
+        Yields
         -------
             dict
         """
