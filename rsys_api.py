@@ -5,7 +5,7 @@ import utils
 import logging
 import requests
 import time
-from typing import Callable, Optional
+from typing import Callable, Iterator
 
 
 class Session:
@@ -177,12 +177,11 @@ class Session:
 
     @utils.log_wrap(
         logging_func=logging.info,
-        before_msg="Fetching a batch of campaigns"
+        before_msg="Fetching a campaign batch"
     )
-    def fetch_all_campaigns(
+    def fetch_a_campaign_batch(
         self,
-        limit: int = 200, offset: int = 0, campaign_type: str = "email",
-        resource_path: Optional[str] = None
+        limit: int = 200, offset: int = 0, campaign_type: str = "email"
     ) -> dict:
         """Fetches a maximum of 200 campaigns and their properties at a time.
 
@@ -190,42 +189,56 @@ class Session:
         Center, SMS, or MMS campaigns."
 
         Retrieved in ascending order of campaign id.
+        Resets the current page/position of the campaign batch generator.
+        Use fetch_next_campaign_batch to get the next batch.
 
         Parameters
         ----------
             offset : int
             limit : int
             campaign_type : str
-            resource_path : str
-                Optional, overrides the offset, limit, and campaign_type args.
 
         Returns
         -------
             dict
         """
-        if resource_path is None:
-            resource_path = self._base_resource_path +  \
-                f"campaigns?limit={limit}&offset={offset}&type={campaign_type}"
-        response = self._try_request(
-            function=requests.get,
-            timeout=config.TRY_REQUEST_SETTINGS['request_timeout'],
-            url=self._obtained_url+resource_path,
-            headers={
-                'Authorization': self._auth_token,
-                'Content-Type': 'application/json'
-            }
+        self._batch_of_campaigns: dict = self._campaign_batch_generator(
+            limit=limit, offset=offset, campaign_type=campaign_type
         )
-        return response.json()
+        fetch = next(self._batch_of_campaigns)
+        return fetch
+
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Fetching next campaign batch"
+    )
+    def fetch_next_campaign_batch(self) -> dict:
+        """Get the next batch of the fetch_a_campaign_batch.
+
+        Cannot be used successfully if the function, fetch_a_campaign_batch,
+        has not been used yet.
+        Retrieved in ascending order of campaign id.
+        """
+        try:
+            fetch = next(self._batch_of_campaigns)
+            return fetch
+        except AttributeError:
+            logging.exception(
+                "fetch_a_campaign_batch must be called before "
+                "fetch_next_campaign_batch can be called."
+            )
+        except StopIteration:
+            logging.exception("The last campaign has already been fetched.")
 
     @utils.log_wrap(
         logging_func=logging.info,
         before_msg="Begin fetching every campaign",
         after_msg="Finished fetching every campaign"
     )
-    def complete_fetch_all_campaigns(
+    def fetch_all_campaigns(
         self, campaign_type: str = "email"
     ) -> dict:
-        """Runs fetch_all_campaigns until all campaigns are fetched.
+        """Fetches every campaign.
 
         Parameters
         ----------
@@ -235,30 +248,28 @@ class Session:
         -------
             dict
         """
-        fetched: dict = self.fetch_all_campaigns(
+        batch: dict = self._campaign_batch_generator(
             limit=200, offset=0, campaign_type=campaign_type
         )
-        # Get the resource_path for the next batch, if available.
-        resource_path: str = self._get_next_resource_path(fetched)
-        while (resource_path):
-            current_batch: dict = self.fetch_all_campaigns(
-                resource_path=resource_path
-            )
-            fetched['campaigns'] += current_batch['campaigns']
-            fetched['links'] = current_batch['links']
-            resource_path = self._get_next_resource_path(fetched)
+        fetched = next(batch)
+        while True:
+            try:
+                next_batch = next(batch)
+                fetched['campaigns'] += next_batch['campaigns']
+                fetched['links'] += next_batch['links']
+            except StopIteration:
+                break
         self._dedupe("campaigns", fetched)
         return fetched
 
     # Programs
     @utils.log_wrap(
         logging_func=logging.info,
-        before_msg="Fetching a batch of programs"
+        before_msg="Fetching a program batch"
     )
-    def fetch_all_programs(
+    def fetch_a_program_batch(
         self,
-        limit: int = 200, offset: int = 0, status: str = "",
-        resource_path: Optional[str] = None
+        limit: int = 200, offset: int = 0, status: str = ""
     ) -> dict:
         """Fetches a maximum of 200 programs and their properties at a time.
 
@@ -268,40 +279,54 @@ class Session:
         status information."
 
         Retrieved in ascending order of program id.
+        Resets the current page/position of the program batch generator.
+        Use fetch_next_program_batch to get the next batch.
 
         Parameters
         ----------
             limit : int
             offset : int
             status : str
-            resource_path : str
-                Optional, overrides the offset, limit, and status args.
 
         Returns
         -------
             dict
         """
-        if resource_path is None:
-            resource_path = self._base_resource_path +  \
-                f"programs?limit={limit}&offset={offset}&status={status}"
-        response = self._try_request(
-            function=requests.get,
-            timeout=config.TRY_REQUEST_SETTINGS['request_timeout'],
-            url=self._obtained_url+resource_path,
-            headers={
-                'Authorization': self._auth_token,
-                'Content-Type': 'application/json'
-            }
+        self._batch_of_programs: dict = self._program_batch_generator(
+            limit=limit, offset=offset, status=status
         )
-        return response.json()
+        fetch = next(self._batch_of_programs)
+        return fetch
+
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Fetching next program batch"
+    )
+    def fetch_next_program_batch(self) -> dict:
+        """Get the next batch after the fetch_a_program_batch.
+
+        Cannot be used successfully if the function, fetch_a_program_batch, has
+        not been used yet.
+        Retrieved in ascending order of program id.
+        """
+        try:
+            fetch = next(self._batch_of_programs)
+            return fetch
+        except AttributeError:
+            logging.exception(
+                "fetch_a_program_batch must be called before "
+                "fetch_next_program_batch can be called."
+            )
+        except StopIteration:
+            logging.exception("The last program has already been fetched.")
 
     @utils.log_wrap(
         logging_func=logging.info,
         before_msg="Begin fetching every program",
         after_msg="Finished fetching every program"
     )
-    def complete_fetch_all_programs(self, status: str = "") -> dict:
-        """Runs fetch_all_programs until all programs are fetched.
+    def fetch_all_programs(self, status: str = "") -> dict:
+        """Fetches every program.
 
         Parameters
         ----------
@@ -311,18 +336,17 @@ class Session:
         -------
             dict
         """
-        fetched: dict = self.fetch_all_programs(
+        batch: dict = self._program_batch_generator(
             limit=200, offset=0, status=status
         )
-        # Get the resource_path for the next batch, if available.
-        resource_path: str = self._get_next_resource_path(fetched)
-        while (resource_path):
-            current_batch: dict = self.fetch_all_programs(
-                resource_path=resource_path
-            )
-            fetched['programs'] += current_batch['programs']
-            fetched['links'] = current_batch['links']
-            resource_path = self._get_next_resource_path(fetched)
+        fetched = next(batch)
+        while True:
+            try:
+                next_batch = next(batch)
+                fetched['programs'] += next_batch['programs']
+                fetched['links'] += next_batch['links']
+            except StopIteration:
+                break
         self._dedupe("programs", fetched)
         return fetched
 
@@ -435,6 +459,90 @@ class Session:
             "program."
         )
         raise exceptions.FailedTryRequest()
+
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Generating batch of campaigns"
+    )
+    def _campaign_batch_generator(
+        self,
+        limit: int = 200, offset: int = 0, campaign_type: str = "email"
+    ) -> dict:
+        """Fetches a maximum of 200 campaigns and their properties at a time.
+
+        "Obtain the campaign properties for all EMD Email, Push, Message
+        Center, SMS, or MMS campaigns."
+
+        Retrieved in ascending order of campaign id.
+
+        Parameters
+        ----------
+            offset : int
+            limit : int
+            campaign_type : str
+
+        Yields
+        -------
+            dict
+        """
+        resource_path: str = self._base_resource_path +  \
+            f"campaigns?limit={limit}&offset={offset}&type={campaign_type}"
+        while resource_path != "":
+            response = self._try_request(
+                function=requests.get,
+                timeout=config.TRY_REQUEST_SETTINGS['request_timeout'],
+                url=self._obtained_url+resource_path,
+                headers={
+                    'Authorization': self._auth_token,
+                    'Content-Type': 'application/json'
+                }
+            )
+            response_json = response.json()
+            yield response_json
+            resource_path = self._get_next_resource_path(response_json)
+
+    @utils.log_wrap(
+        logging_func=logging.info,
+        before_msg="Generating a batch of programs"
+    )
+    def _program_batch_generator(
+        self,
+        limit: int = 200, offset: int = 0, status: str = ""
+    ) -> dict:
+        """Fetches a maximum of 200 programs and their properties at a time.
+
+        "Use this interface to get a list of Responsys program orchestrations
+        for an account and the associated metadata for each program. The
+        response includes draft and published programs, and it includes program
+        status information."
+
+        Retrieved in ascending order of program id.
+
+        Parameters
+        ----------
+            limit : int
+            offset : int
+            status : str
+
+        Returns
+        -------
+            dict
+        """
+        resource_path: str = self._base_resource_path +  \
+            f"programs?limit={limit}&offset={offset}&status={status}"
+        while resource_path:
+            response = self._try_request(
+                function=requests.get,
+                timeout=config.TRY_REQUEST_SETTINGS['request_timeout'],
+                url=self._obtained_url+resource_path,
+                headers={
+                    'Authorization': self._auth_token,
+                    'Content-Type': 'application/json'
+                }
+            )
+            response_json = response.json()
+            yield response_json
+            resource_path = self._get_next_resource_path(response_json)
 
     @utils.log_wrap(
         logging_func=logging.debug,

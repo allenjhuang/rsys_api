@@ -14,7 +14,7 @@ TRY_REQUEST_SETTINGS = {
     # Amount of time in seconds to wait between each try
     'wait_before_next_attempt': 30.0,
     # Try an API call until one of the listed status codes is returned
-    'target_status_codes': [200],  # Can add acceptable status codes here.
+    'target_status_codes': [200],  # Add acceptable status codes to the list.
     # Seconds to wait for an API call before timing out
     'request_timeout': 20.0
 }

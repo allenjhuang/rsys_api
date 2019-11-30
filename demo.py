@@ -25,26 +25,49 @@ def main():
     session.password_login(
         secrets.USER_NAME, secrets.PASSWORD
     )
+    # Output throttle limits into a json file.
     with open("throttle_limits.json", 'w') as output_file:
-        # Output throttle limits into a json file within the same directory.
         json.dump(
             obj=session.get_throttle_limits(),
             indent=4,
             fp=output_file
         )
-    with open("fetched_programs.json", 'w') as output_file:
-        # Output information on all running programs into a json file within
-        # the same directory.
+    # Output information on the next batch of campaigns into a json file.
+    with open("next_fetched_campaign_batch.json", 'w') as output_file:
         json.dump(
-            obj=session.complete_fetch_all_programs(status="RUNNING"),
+            obj=session.fetch_next_campaign_batch(),
             indent=4,
             fp=output_file
         )
-    with open("fetched_campaigns.json", 'w') as output_file:
-        # Output information on all running programs into a json file within
-        # the same directory.
+    # Output information on a batch of campaigns into a json file.
+    with open("fetched_campaign_batch.json", 'w') as output_file:
         json.dump(
-            obj=session.complete_fetch_all_campaigns(campaign_type="email"),
+            obj=session.fetch_a_campaign_batch(
+                limit=200,
+                offset=0,
+                campaign_type="email"
+            ),
+            indent=4,
+            fp=output_file
+        )
+    # Output information on the next batch of campaigns into a json file.
+    with open("next_fetched_campaign_batch.json", 'w') as output_file:
+        json.dump(
+            obj=session.fetch_next_campaign_batch(),
+            indent=4,
+            fp=output_file
+        )
+    # Output information on all running programs into a json file.
+    with open("all_fetched_programs.json", 'w') as output_file:
+        json.dump(
+            obj=session.fetch_all_programs(status="RUNNING"),
+            indent=4,
+            fp=output_file
+        )
+    # Output information on all running campaigns into a json file.
+    with open("all_fetched_campaigns.json", 'w') as output_file:
+        json.dump(
+            obj=session.fetch_all_campaigns(campaign_type="email"),
             indent=4,
             fp=output_file
         )
